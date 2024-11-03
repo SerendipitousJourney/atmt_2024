@@ -182,6 +182,29 @@ class AttentionLayer(nn.Module):
 
         return attn_scores
 
+class LexicalLayer(nn.Module):
+    def __init__(self, embed_dim, hidden_size, dropout=0.25):
+        super().__init__()
+        self.dropout = dropout
+        self.src_projection = nn.Linear(embed_dim, hidden_size, bias=False)
+        
+    def forward(self, src_embeddings, attn_weights):
+        if src_embeddings.shape[1] == 64:  
+            src_embeddings = src_embeddings.transpose(0, 1).transpose(1, 2)
+            
+        projected_src = self.src_projection(src_embeddings)  
+        
+        if attn_weights.shape[0] != src_embeddings.shape[0]:
+            attn_weights = attn_weights.transpose(0, 1)
+        attn_weights = attn_weights.unsqueeze(1)  
+        
+        lexical_context = torch.bmm(attn_weights, projected_src)  
+        lexical_context = lexical_context.squeeze(1)  
+        lexical_context = F.dropout(lexical_context, p=self.dropout, training=self.training)
+        
+        return lexical_context
+
+
 
 class LSTMDecoder(Seq2SeqDecoder):
     """ Defines the decoder class. """
@@ -223,9 +246,8 @@ class LSTMDecoder(Seq2SeqDecoder):
 
         self.use_lexical_model = use_lexical_model
         if self.use_lexical_model:
-            # __LEXICAL: Add parts of decoder architecture corresponding to the LEXICAL MODEL here
-            pass
-            # TODO: --------------------------------------------------------------------- /CUT
+            self.lexical_model = LexicalLayer(embed_dim, hidden_size, dropout_out)
+            self.output_projection = nn.Linear(2 * hidden_size, len(dictionary))
 
     def forward(self, tgt_inputs, encoder_out, incremental_state=None):
         """ Performs the forward pass through the instantiated model. """
@@ -290,10 +312,13 @@ class LSTMDecoder(Seq2SeqDecoder):
                 attn_weights[:, j, :] = step_attn_weights
 
                 if self.use_lexical_model:
-                    # __LEXICAL: Compute and collect LEXICAL MODEL context vectors here
-                    # TODO: --------------------------------------------------------------------- CUT
-                    pass
-                    # TODO: --------------------------------------------------------------------- /CUT
+                    if src_embeddings.shape[0] != batch_size:
+                        current_src_embeddings = src_embeddings.transpose(0, 1)
+                    else:
+                        current_src_embeddings = src_embeddings
+                        
+                    step_lexical_context = self.lexical_model(current_src_embeddings, step_attn_weights)
+                    lexical_contexts.append(step_lexical_context)
 
             input_feed = F.dropout(input_feed, p=self.dropout_out, training=self.training)
             rnn_outputs.append(input_feed)
@@ -303,19 +328,16 @@ class LSTMDecoder(Seq2SeqDecoder):
             self, incremental_state, 'cached_state', (tgt_hidden_states, tgt_cell_states, input_feed))
 
         # Collect outputs across time steps
-        decoder_output = torch.cat(rnn_outputs, dim=0).view(tgt_time_steps, batch_size, self.hidden_size)
-
+        decoder_output = torch.cat(rnn_outputs, dim=0).view(tgt_time_steps, batch_size, self.hidden_size)        
         # Transpose batch back: [tgt_time_steps, batch_size, num_features] -> [batch_size, tgt_time_steps, num_features]
-        decoder_output = decoder_output.transpose(0, 1)
-
-        # Final projection
-        decoder_output = self.final_projection(decoder_output)
+        decoder_output = decoder_output.transpose(0, 1)  
 
         if self.use_lexical_model:
-            # __LEXICAL: Incorporate the LEXICAL MODEL into the prediction of target tokens here
-            pass
-            # TODO: --------------------------------------------------------------------- /CUT
-
+            lexical_output = torch.stack(lexical_contexts, dim=1)  
+            combined_output = torch.cat([decoder_output, lexical_output], dim=-1)
+            decoder_output = self.output_projection(combined_output)
+        else:
+            decoder_output = self.final_projection(decoder_output)
 
         return decoder_output, attn_weights
 
@@ -337,4 +359,4 @@ def base_architecture(args):
     args.decoder_dropout_in = getattr(args, 'decoder_dropout_in', 0.25)
     args.decoder_dropout_out = getattr(args, 'decoder_dropout_out', 0.25)
     args.decoder_use_attention = getattr(args, 'decoder_use_attention', 'True')
-    args.decoder_use_lexical_model = getattr(args, 'decoder_use_lexical_model', 'False')
+    args.decoder_use_lexical_model = getattr(args, 'decoder_use_lexical_model', 'True')
