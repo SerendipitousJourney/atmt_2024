@@ -21,12 +21,16 @@ class BeamSearch(object):
         """ Adds a new beam search node to the queue of current nodes """
         self.nodes.put((score, next(self._counter), node))
 
+#   def add_final(self, score, node):
+#       """ Adds a beam search path that ended in EOS (= finished sentence) """
+#        # ensure all node paths have the same length for batch ops
+#        missing = self.max_len - node.length
+#        node.sequence = torch.cat((node.sequence.cpu(), torch.tensor([self.pad]*missing).long()))
+#        self.final.put((score, next(self._counter), node))
+
     def add_final(self, score, node):
-        """ Adds a beam search path that ended in EOS (= finished sentence) """
-        # ensure all node paths have the same length for batch ops
-        missing = self.max_len - node.length
-        node.sequence = torch.cat((node.sequence.cpu(), torch.tensor([self.pad]*missing).long()))
-        self.final.put((score, next(self._counter), node))
+        node.is_finished = True
+        self.nodes.put((score, next(self._counter), node))
 
     def get_current_beams(self):
         """ Returns beam_size current nodes with the lowest negative log probability """
@@ -54,20 +58,31 @@ class BeamSearch(object):
 
         return node
 
+#    def prune(self):
+#        """ Removes all nodes but the beam_size best ones (lowest neg log prob) """
+#        nodes = PriorityQueue()
+#        # Keep track of how many search paths are already finished (EOS)
+#        finished = self.final.qsize()
+#        for _ in range(self.beam_size-finished):
+#            node = self.nodes.get()
+#            nodes.put(node)
+#        self.nodes = nodes
+
     def prune(self):
-        """ Removes all nodes but the beam_size best ones (lowest neg log prob) """
-        nodes = PriorityQueue()
-        # Keep track of how many search paths are already finished (EOS)
-        finished = self.final.qsize()
-        for _ in range(self.beam_size-finished):
-            node = self.nodes.get()
-            nodes.put(node)
-        self.nodes = nodes
+        """ Ensures the beam size remains constant """
+        nodes = []
+        while not self.nodes.empty():
+            nodes.append(self.nodes.get())
+        # Keep top-k nodes
+        nodes = sorted(nodes, key=lambda x: x[0])[:self.beam_size]
+        self.nodes = PriorityQueue()
+        for node in nodes:
+            self.nodes.put(node)
 
 
 class BeamSearchNode(object):
     """ Defines a search node and stores values important for computation of beam search path"""
-    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length):
+    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length, is_finished = False):
 
         # Attributes needed for computation of decoder states
         self.sequence = sequence
@@ -82,6 +97,8 @@ class BeamSearchNode(object):
         self.length = length
 
         self.search = search
+
+        self.is_finished = is_finished
 
     def eval(self, alpha=0.0):
         """ Returns score of sequence up to this node 

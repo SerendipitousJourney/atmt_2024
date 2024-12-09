@@ -126,10 +126,14 @@ def main(args):
         # Start generating further tokens until max sentence length reached
         for _ in range(args.max_len-1):
 
-            # Get the current nodes to expand
+#            # Get the current nodes to expand
+#            nodes = [n[1] for s in searches for n in s.get_current_beams()]
+#            if nodes == []:
+#                break # All beams ended in EOS
+
             nodes = [n[1] for s in searches for n in s.get_current_beams()]
-            if nodes == []:
-                break # All beams ended in EOS
+            if all(node.is_finished for node in nodes):
+                break  # Stop when all beams are finished
 
             # Reconstruct prev_words, encoder_out from current beam search nodes
             prev_words = torch.stack([node.sequence for node in nodes])
@@ -175,7 +179,7 @@ def main(args):
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp, node.length
+                            next_word)), node.logp, node.length, is_finished = True
                             )
                         search.add_final(-node.eval(args.alpha), node)
 
@@ -184,7 +188,7 @@ def main(args):
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp + log_p, node.length + 1
+                            next_word)), node.logp + log_p, node.length + 1, is_finished = False
                             )
                         search.add(-node.eval(args.alpha), node)
 
