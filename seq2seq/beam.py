@@ -17,6 +17,8 @@ class BeamSearch(object):
 
         self._counter = count() # for correct ordering of nodes with same score
 
+        self.finished_hypothesis_score = float('inf')
+
     def add(self, score, node):
         """ Adds a new beam search node to the queue of current nodes """
         self.nodes.put((score, next(self._counter), node))
@@ -31,6 +33,7 @@ class BeamSearch(object):
     def add_final(self, score, node):
         node.is_finished = True
         self.nodes.put((score, next(self._counter), node))
+        self.finished_hypothesis_score = min(self.finished_hypothesis_score, score)
 
     def get_current_beams(self):
         """ Returns beam_size current nodes with the lowest negative log probability """
@@ -69,11 +72,11 @@ class BeamSearch(object):
 #        self.nodes = nodes
 
     def prune(self):
-        """ Ensures the beam size remains constant """
         nodes = []
         while not self.nodes.empty():
-            nodes.append(self.nodes.get())
-        # Keep top-k nodes
+            score, _, node = self.nodes.get()
+            if score < self.finished_hypothesis_score:
+                nodes.append((score, next(self._counter), node))
         nodes = sorted(nodes, key=lambda x: x[0])[:self.beam_size]
         self.nodes = PriorityQueue()
         for node in nodes:

@@ -132,7 +132,7 @@ def main(args):
 #                break # All beams ended in EOS
 
             nodes = [n[1] for s in searches for n in s.get_current_beams()]
-            if all(node.is_finished for node in nodes):
+            if all(node.is_finished for node in nodes) or not nodes:
                 break  # Stop when all beams are finished
 
             # Reconstruct prev_words, encoder_out from current beam search nodes
